@@ -910,7 +910,7 @@ V8 shared library set USING_V8_SHARED.
      !(V8_HOST_ARCH_X64 && V8_HOST_ARCH_32_BIT))
 #error Target architecture x32 is only supported on x64 host with x32 support
 #endif
-#if (V8_TARGET_ARCH_ARM && !(V8_HOST_ARCH_IA32 || V8_HOST_ARCH_ARM))
+#if (V8_TARGET_ARCH_ARM && !(V8_HOST_ARCH_IA32 || V8_HOST_ARCH_ARM || V8_HOST_ARCH_X64))
 #error Target architecture arm is only supported on arm and ia32 host
 #endif
 #if (V8_TARGET_ARCH_ARM64 && !(V8_HOST_ARCH_X64 || V8_HOST_ARCH_ARM64))
