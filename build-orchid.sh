@@ -465,7 +465,7 @@ install_on() {
     install -m 0755 '${remote_tmp}' '${remote_node}'
     rm -f '${remote_tmp}'
     [ -e '${remote_nodejs}' ] || ln -s '${remote_node}' '${remote_nodejs}'
-    for shell_init in \"\$HOME/.bashrc\" \"\$HOME/.profile\" \"\$HOME/.bash_profile\"; do
+    for shell_init in \"\$HOME/.bashrc\" \"\$HOME/.profile\"; do
       [ -e \"\$shell_init\" ] || : > \"\$shell_init\"
       if ! grep -Fq '${remote_bin_dir}' \"\$shell_init\"; then
         printf '\nexport PATH=\"%s:\$PATH\"\n' '${remote_bin_dir}' >> \"\$shell_init\"
