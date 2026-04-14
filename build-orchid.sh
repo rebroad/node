@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-NODE_DIR=$(cd "$(dirname "$0")" && pwd)
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+NODE_DIR="$SCRIPT_DIR"
 HOST="orchid"
 INSTALL_TO=0
 INSTALL_ONLY=0
@@ -56,6 +57,69 @@ Options:
   --log-file PATH            Build logfile path (default: /var/tmp/node-build-<ts>.log)
   -h, --help                 Show this help
 USAGE
+}
+
+detect_source_and_build_tree() {
+  dir="$1"
+  base="$(basename "$dir")"
+  parent="$(dirname "$dir")"
+  source_dir=""
+  build_tree=""
+
+  case "$base" in
+    *.build|*.make|*.other)
+      source_dir="${dir%.*}"
+      build_tree="$dir"
+      ;;
+    *)
+      source_dir="$dir"
+      if [ -d "${dir}.build" ]; then
+        build_tree="${dir}.build"
+      elif [ -d "${dir}.make" ]; then
+        build_tree="${dir}.make"
+      elif [ -d "${dir}.other" ]; then
+        build_tree="${dir}.other"
+      fi
+      ;;
+  esac
+
+  if [ -n "$source_dir" ] && [ ! -f "$source_dir/configure" ]; then
+    source_dir=""
+  fi
+
+  if [ -n "$build_tree" ] && [ ! -f "$build_tree/configure" ]; then
+    build_tree=""
+  fi
+
+  printf '%s\n%s\n' "$source_dir" "$build_tree"
+}
+
+sync_source_to_build_tree() {
+  src="$1"
+  bld="$2"
+  if [ -z "$src" ] || [ -z "$bld" ] || [ "$src" = "$bld" ]; then
+    return 0
+  fi
+  require_cmd cpto
+  status "Syncing source -> build tree via cpto: $src -> $bld"
+  cpto "$src" "$bld"
+}
+
+reexec_in_build_tree_if_needed() {
+  set -- "$@"
+  detected="$(detect_source_and_build_tree "$NODE_DIR")"
+  source_dir="$(printf '%s\n' "$detected" | sed -n '1p')"
+  build_tree="$(printf '%s\n' "$detected" | sed -n '2p')"
+
+  if [ -n "$source_dir" ] && [ -n "$build_tree" ] && [ "$NODE_DIR" = "$source_dir" ]; then
+    sync_source_to_build_tree "$source_dir" "$build_tree"
+    script_name="$(basename "$0")"
+    if [ -x "$build_tree/$script_name" ]; then
+      exec "$build_tree/$script_name" "$@"
+    fi
+    echo "error: expected script missing in build tree: $build_tree/$script_name" >&2
+    exit 2
+  fi
 }
 
 status() {
@@ -381,11 +445,11 @@ run_container_build() {
         rm -rf out
       fi
 
-      ./configure --dest-os=linux --dest-cpu=ia32 --openssl-no-asm --with-intl=none
-      # Host tools for this build must be ia32-compatible; normalize flags and use ia32 stack-walk asm.
-      if ls out/tools/v8_gypfiles/*.host.mk >/dev/null 2>&1; then
-        sed -Ei "s/(^|[[:space:]])-m64([[:space:]]|$)/ -m32 /g" out/tools/v8_gypfiles/*.host.mk
-        sed -i "s#heap/base/asm/x64/push_registers_asm#heap/base/asm/ia32/push_registers_asm#g" out/tools/v8_gypfiles/*.host.mk
+      ./configure --cross-compiling --dest-os=linux --dest-cpu=ia32 --openssl-no-asm --with-intl=full-icu
+      # In this cross setup, host tools must be built as ia32 to satisfy V8
+      # host-arch checks for ia32 targets, including ICU host utilities.
+      if find out -name "*.host.mk" -type f | grep -q .; then
+        find out -name "*.host.mk" -type f -print0 | xargs -0 sed -Ei "s/(^|[[:space:]])-m64([[:space:]]|$)/ -m32 /g"
       fi
       # Ensure zlib ia32 SIMD helpers compile with matching SSE flags in this toolchain setup.
       if [ -f out/deps/zlib/zlib.target.mk ]; then
@@ -476,6 +540,8 @@ install_on() {
 
   echo "Install complete on ${remote_host}. node path: ${remote_node}"
 }
+
+reexec_in_build_tree_if_needed "$@"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -585,6 +651,13 @@ cd "$NODE_DIR"
 ensure_not_source_tree_build
 ensure_not_codex_sandbox
 ensure_log_file
+
+detected_paths="$(detect_source_and_build_tree "$NODE_DIR")"
+source_dir="$(printf '%s\n' "$detected_paths" | sed -n '1p')"
+build_tree="$(printf '%s\n' "$detected_paths" | sed -n '2p')"
+if [ -n "$source_dir" ] && [ -n "$build_tree" ] && [ "$NODE_DIR" = "$build_tree" ]; then
+  sync_source_to_build_tree "$source_dir" "$build_tree"
+fi
 
 if [ "$INSTALL_ONLY" -eq 1 ]; then
   install_on "$HOST" "$REMOTE_PREFIX"
